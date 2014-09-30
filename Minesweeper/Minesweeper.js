@@ -3,8 +3,10 @@ angular.module('app.ctrl.Minesweeper', [
 .controller('app.ctrl.Minesweeper', function($scope, $timeout, Game, Grid) {
     var game;
     function start_game() {
-        game = Game($scope, $timeout, { mines_count: 10 });
-        $scope.game = game;
+        game                 = Game($timeout, { grid_rows: 9, grid_cols: 9, mines_count: 10 });
+        $scope.game          = game;
+        $scope.grid          = game.grid.grid;
+        $scope.on_cell_click = game.grid.on_cell_click;
     }
     start_game();
 
@@ -13,12 +15,68 @@ angular.module('app.ctrl.Minesweeper', [
         start_game();
     };
 })
-.factory('Grid', function(Cell) {
-    return function($scope, $timeout, args) {
-        var game        = args.game;
-        var rows        = args.rows        ||  9;
-        var cols        = args.cols        ||  9;
+.factory('Game', function($timeout, Grid) {
+    return function(args) {
+        var grid_rows   = args.grid_rows   ||  9;
+        var grid_cols   = args.grid_cols   ||  9;
         var mines_count = args.mines_count || 10;
+        var time        = 0;
+        var over        = { value: false };
+        var win         = { value: false };
+        var lose        = { value: false };
+
+        var grid = Grid({
+            game: { over: over },
+
+            rows: grid_rows, cols: grid_cols, mines_count: mines_count,
+
+            on_player_win:  player_wins,
+            on_player_lose: player_loses,
+        });
+
+        function tick() {
+            if (!over.value) {
+                time++;
+                $timeout(tick, 1000);
+            }
+        }
+        $timeout(tick, 1000);
+        function get_time() { return time; }
+
+        function player_wins() {
+            over.value = true;
+            win.value = true;
+            console.log('win');
+            grid.reveal_mines();
+        };
+
+        function player_loses() {
+            over.value = true;
+            lose.value = true;
+            console.log('lose');
+            grid.reveal_mines();
+        };
+
+        return {
+            grid:        grid,
+            over:        over,
+            win:         win,
+            lose:        lose,
+            mines_count: mines_count,
+            get_time:    get_time,
+
+            sixth_sense: false,
+        };
+    };
+})
+.factory('Grid', function(Cell) {
+    return function(args) {
+        var game           = args.game;
+        var rows           = args.rows;
+        var cols           = args.cols;
+        var mines_count    = args.mines_count;
+        var on_player_win  = args.on_player_win;
+        var on_player_lose = args.on_player_lose;
         var grid;
         var mines_positions;
         var already_visited_cells = [];
@@ -27,33 +85,26 @@ angular.module('app.ctrl.Minesweeper', [
             grid = _.range(1, 1+rows).map(function(row) {
                 return _.range(1, 1+cols).map(function(col) {
 //                    return [row - 1, col - 1];
-                    return Cell($scope, { has_mine: false });
+                    return Cell({ has_mine: false });
                 });
             });
+//            console.log(grid);
         }
         create_grid();
-        $scope.grid = grid;
-//        console.log(grid);
 
         function burrow_mines() {
             var mc = mines_count;
             mines_positions = [];
-            do {
+            while (mc > 0) {
                 var new_mine_row = rand(0, rows - 1);
                 var new_mine_col = rand(0, cols - 1);
 
-                if (
-                    _.any(mines_positions, function(mine_pos) {
-                        return mine_pos[0] == new_mine_row && mine_pos[1] == new_mine_col
-                    })
-                ) {
-                    continue;
-                } else {
+                if (!grid[new_mine_row][new_mine_col].has_mine) {
                     mines_positions.push( [ new_mine_row, new_mine_col ] );
                     grid[new_mine_row][new_mine_col].has_mine = true;
                     mc -= 1;
                 }
-            } while (mc > 0);
+            }
         };
         burrow_mines();
 //        console.log(mines_positions);
@@ -62,14 +113,9 @@ angular.module('app.ctrl.Minesweeper', [
 //            console.log(row, col, cell);
             if (game.over.value || cell.was_clicked) { return; }
 
-            // If we clicked on a mine...
-            if (
-                _.any(mines_positions, function(mine_pos) {
-                    return mine_pos[0] == row && mine_pos[1] == col
-                })
-            ) {
+            if (cell.has_mine) {
                 cell.was_clicked = true;
-                player_loses();
+                on_player_lose();
                 return
             }
 
@@ -77,10 +123,9 @@ angular.module('app.ctrl.Minesweeper', [
 //            console.log(already_visited_cells.length);
 
             if (already_visited_cells.length + mines_count == rows * cols) {
-                player_wins();
+                on_player_win();
             }
         };
-        $scope.on_cell_click = on_cell_click;
 
         function visit_neighbouring_cells(row, col, cell, already_visited_cells) {
             already_visited_cells = already_visited_cells || [];
@@ -135,20 +180,6 @@ angular.module('app.ctrl.Minesweeper', [
 
         };
 
-        function player_wins() {
-            game.over.value = true;
-            game.win.value = true;
-            console.log('win');
-            reveal_mines();
-        };
-
-        function player_loses() {
-            game.over.value = true;
-            game.lose.value = true;
-            console.log('lose');
-            reveal_mines();
-        };
-
         function reveal_mines() {
             _.forEach(mines_positions, function(mine_position) {
                 var x = mine_position[0];
@@ -158,12 +189,14 @@ angular.module('app.ctrl.Minesweeper', [
         }
 
         return {
-            grid: grid,
+            grid:          grid,
+            reveal_mines:  reveal_mines,
+            on_cell_click: on_cell_click,
         };
     };
 })
 .factory('Cell', function() {
-    return function($scope, args) {
+    return function(args) {
         var has_mine    = args.has_mine || false;
         var was_clicked = false;
 //        var mine_image_src = '';
@@ -173,40 +206,6 @@ angular.module('app.ctrl.Minesweeper', [
             has_mine:             has_mine,
             was_clicked:          was_clicked,
             adjacent_mines_count: adjacent_mines_count,
-        };
-    };
-})
-.factory('Game', function(Grid) {
-    return function($scope, $timeout, args) {
-        var mines_count = args.mines_count;
-        var time  = 0;
-        var over  = { value: false };
-        var win   = { value: false };
-        var lose  = { value: false };
-
-        var grid = Grid($scope, $timeout, {
-            game: { over: over, win: win, lose: lose },
-            rows: 9, cols: 9, mines_count: mines_count
-        });
-
-        var get_time = function() { return time; }
-
-        function tick() {
-            if (!over.value) {
-                time++;
-                $timeout(tick, 1000);
-            }
-        }
-        $timeout(tick, 1000);
-
-        return {
-            over:        over,
-            win:         win,
-            lose:        lose,
-            mines_count: mines_count,
-            get_time:    get_time,
-
-            sixth_sense: false,
         };
     };
 })
